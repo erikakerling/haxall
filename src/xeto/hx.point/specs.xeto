@@ -12,6 +12,11 @@
   // value is bound to connector.
   curTracksWrite: Marker?
 
+  // Enables an explicit non-null write at the winning priority to reissue an
+  // effective write observation when the value and priority are unchanged.
+  // Does not override priority arbitration or guarantee device delivery.
+  writeOnRequest: Marker?
+
   // Enables COV history collection of the [ph::PhEntity.curVal].  The tag value must
   // be Marker to collect on any change.  Or if the point is Numeric,
   // then the value may be a Number which indicates the tolerance a point

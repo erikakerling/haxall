@@ -93,33 +93,51 @@ internal class WriteRec
     lvl := levels[level-1]
     if (lvl == null) levels[level-1] = lvl = WriteLevel()
 
+    // check for value or who changes at this priority level
+    priorityArrayChange := lvl.val != val || !whoIsEqual(lvl.who, who)
+
     // short circuit rest of logic if there is no change because
     // its very common for control applications to rewrite
-    // the same value+level at a high frequency in control loops
-    if (lvl.val == val && whoIsEqual(lvl.who, who)) return val
+    // the same value+level at a high frequency in control loops;
+    // writeOnRequest points continue to check reissue eligibility
+    if (!priorityArrayChange && !rec.has("writeOnRequest")) return val
 
-    // update level val and who
-    lvl.val = val
-    lvl.who = who
-
-    // determine if we need to persist this write (1, 8, and def)
-    if (duration == null)
+    effectiveChange := false
+    if (priorityArrayChange)
     {
-      switch (level)
+      // update level val and who
+      lvl.val = val
+      lvl.who = who
+
+      // determine if we need to persist this write (1, 8, and def)
+      if (duration == null)
       {
-        case 1:  persist(mgr, "write1", val)
-        case 8:  persist(mgr, "write8", val)
-        case 17: persist(mgr, "writeDef", val)
+        switch (level)
+        {
+          case 1:  persist(mgr, "write1", val)
+          case 8:  persist(mgr, "write8", val)
+          case 17: persist(mgr, "writeDef", val)
+        }
       }
+
+      // update output
+      effectiveChange = update(mgr)
     }
 
-    // update output
-    effectiveChange := update(mgr)
+    // reissue an unchanged winning value when writeOnRequest is configured
+    reissue := false
+    if (!effectiveChange && rec.has("writeOnRequest"))
+      reissue = val != null &&
+                lastVal == val &&
+                lastLevel == levelNums[level-1]
+
+    // skip observations if neither the priority array changed nor a reissue is eligible
+    if (!priorityArrayChange && !reissue) return val
 
     // fire observations only after steady state is reached;
     // steady state is when we uniformly fire off all initial writes
     if (mgr.proj.isSteadyState)
-      mgr.fireObservation(this, val, levelNums[level-1], who, opts, effectiveChange, false)
+      mgr.fireObservation(this, val, levelNums[level-1], who, opts, effectiveChange || reissue, false)
 
     return val
   }

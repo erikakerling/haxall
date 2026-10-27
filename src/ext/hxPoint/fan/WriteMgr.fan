@@ -155,15 +155,14 @@ internal class WriteMgr : PointMgr
   }
 
   ** Called by WriteRec on all writes
-  internal Void fireObservation(WriteRec writeRec, Obj? val, Number level, Obj? who, Dict? opts, Bool effectiveChange, Bool first)
+  internal Void fireObservation(WriteRec writeRec, Obj? val, Number level, Obj? who, Dict? opts, Bool notifyEffective, Bool first)
   {
     // short circuit if observable has no subscriptions
     observable := ext.writeMgr.observable
     if (!observable.hasSubscriptions) return
 
-    // we have two potential events; for normal subscribers we are sending an
-    // event only on a new effective value+level.  But for the subscribers with
-    // the 'obsAllWrites' flag we are firing event for each specific level change.
+    // normal subscribers observe effective value+level changes and reissues;
+    // 'obsAllWrites' subscribers also observe value or who changes at any level
     // We lazily create these events in the loop below
     ts := DateTime.now
     rec := writeRec.rec
@@ -174,8 +173,8 @@ internal class WriteMgr : PointMgr
     // fire event to subscribed observers
     observable.subscriptions.each |WriteSubscription sub|
     {
-      // short circuit if not an effective change and not subscribed to all changes
-      if (!effectiveChange && !sub.isAllWrites) return
+      // short circuit if no effective write and not subscribed to all changes
+      if (!notifyEffective && !sub.isAllWrites) return
 
       // short circuit if subscription filter doesn't match
       if (!sub.include(rec, cx)) return
@@ -184,14 +183,14 @@ internal class WriteMgr : PointMgr
       if (sub.isAllWrites)
       {
         // this subscriber has the 'obsAllWrites' flag, so we fire
-        // event for the specific level which has been modified
+        // event for the specific level which has been modified or reissued
         if (eventAll == null) eventAll = WriteObservation(observable, ts, writeRec.id, rec, val, level, who, opts, first)
         sub.send(eventAll)
       }
       else
       {
         // normal subscriber, so we fire an event for
-        // the new effective level cached by lastVal, lastLevel
+        // the effective value and level cached by lastVal, lastLevel
         if (eventEff == null) eventEff = WriteObservation(observable, ts, writeRec.id, rec, writeRec.lastVal, writeRec.lastLevel, who, opts, first)
         sub.send(eventEff)
       }

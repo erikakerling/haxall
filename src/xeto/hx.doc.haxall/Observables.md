@@ -241,8 +241,9 @@ observations.
 
 ## Point Writes
 The [hx.obs::Observable.obsPointWrites] observable monitors updates to the priority array
-of [writable points](ph::WritablePoint).  An event is fired only when the *effective*
-write value is modified (at the winning level).
+of [writable points](ph::WritablePoint).  An event is fired when the *effective*
+write value or level changes, or for eligible reissues with
+[hx.point::Point.writeOnRequest].
 
 Observation events include the following tags:
   - `type`: "obsPointWrites"

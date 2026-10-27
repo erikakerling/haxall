@@ -75,9 +75,10 @@ Write rules:
   investigation with `pointWriteArray(pt)` - it shows every level,
   who set it, and timed override expiration
 
-The `obsPointWrites` observable fires when the effective value
-changes (not on every level write), so tasks can react to command
-changes.
+The `obsPointWrites` observable fires when the effective value or
+level changes (not on every level write), so tasks can react to
+command changes. With `writeOnRequest`, it also fires for eligible
+reissues.
 
 # History Collection
 
