@@ -563,21 +563,95 @@ abstract class ApiTest : HxTest
   Void doPointWrite()
   {
     traceSection("doPointWrite")
-    callOp(c, "pointWrite", ["id":ptW.id, "level":n(16), "val":n(160)])
-    callOp(c, "pointWrite", ["id":ptW.id, "level":n(8), "val":n(80), "duration":n(1, "hr")])
-    res := (Grid)callOp(c, "pointWrite", ["id":ptW.id])
 
-    verifyEq(res.size, 17)
+    // identical level 18 requests each publish an effective write through HTTP
+    forceSteadyState
+    proj.exts.get("hx.point").spi.sync
+    writes := TestObserver()
+    sub := proj.obs.get("obsPointWrites").subscribe(writes,
+      Etc.dict1("obsFilter", "id==${ptW.id.toCode}"))
+    try
+    {
+      2.times
+      {
+        callOp(b, "pointWrite", ["id":ptW.id, "level":n(18), "val":n(180), "who":"api-18"])
+        res := (Grid)callOp(a, "pointWrite", ["id":ptW.id])
+        verifyEq(res.size, 18)
+        verifyEq(res[17]->level, n(18))
+        verifyEq(res[17]->val, n(180))
+        verifyEq(res[17]->who, "Haystack.pointWrite | api-18")
+        verifyEq(res.meta["writeVal"], n(180))
+        verifyEq(res.meta["writeLevel"], n(18))
+      }
+      writes.sync
+      verifyEq(writes.msgs.size, 2)
+      writes.msgs.each |Dict event|
+      {
+        verifyEq(event["val"], n(180))
+        verifyEq(event["level"], n(18))
+        verifyEq(event["who"], "Haystack.pointWrite | api-18")
+      }
+    }
+    finally sub.unsubscribe
+
+    // ordinary writes change the output while retaining the last level 18 request
+    callOp(c, "pointWrite", ["id":ptW.id, "level":n(16), "val":n(160)])
+    res := (Grid)callOp(c, "pointWrite", ["id":ptW.id])
+    verifyEq(res.meta["writeVal"], n(160))
+    verifyEq(res.meta["writeLevel"], n(16))
+    verifyEq(res[17]["val"], n(180))
+    verifyEq(res[17]["who"], "Haystack.pointWrite | api-18")
+
+    callOp(c, "pointWrite", ["id":ptW.id, "level":n(8), "val":n(80), "duration":n(1, "hr")])
+    res = (Grid)callOp(c, "pointWrite", ["id":ptW.id])
+    verifyEq(res.size, 18)
     verifyEq(res[7]->level, n(8))
     verifyEq(res[7]->val, n(80))
     verifyEq(res[7].has("expires"), true)
-
     verifyEq(res[15]->level, n(16))
     verifyEq(res[15]->val, n(160))
+    verifyEq(res.meta["writeVal"], n(80))
+    verifyEq(res.meta["writeLevel"], n(8))
+    verifyEq(res[17]["val"], n(180))
+    verifyEq(res[17]["who"], "Haystack.pointWrite | api-18")
+
+    // a new masked request replaces the retained value and who without changing output
+    callOp(b, "pointWrite", ["id":ptW.id, "level":n(18), "val":n(181), "who":"api-masked"])
+    res = (Grid)callOp(a, "pointWrite", ["id":ptW.id])
+    verifyEq(res.meta["writeVal"], n(80))
+    verifyEq(res.meta["writeLevel"], n(8))
+    verifyEq(res[17]["val"], n(181))
+    verifyEq(res[17]["who"], "Haystack.pointWrite | api-masked")
+
+    // releasing a masked level leaves the effective output and request unchanged
+    callOp(b, "pointWrite", ["id":ptW.id, "level":n(16)])
+    res = (Grid)callOp(a, "pointWrite", ["id":ptW.id])
+    verifyEq(res.meta["writeVal"], n(80))
+    verifyEq(res.meta["writeLevel"], n(8))
+    verifyEq(res[15]["val"], null)
+    verifyEq(res[17]["val"], n(181))
+    verifyEq(res[17]["who"], "Haystack.pointWrite | api-masked")
+
+    // releasing the winning level retains the request without falling back to it
+    callOp(b, "pointWrite", ["id":ptW.id, "level":n(8)])
+    res = (Grid)callOp(a, "pointWrite", ["id":ptW.id])
+    verifyEq(res.meta["writeVal"], null)
+    verifyEq(res.meta["writeLevel"], n(17))
+    verifyEq(res[17]["val"], n(181))
+    verifyEq(res[17]["who"], "Haystack.pointWrite | api-masked")
+
+    // restore the fixture for the remaining API checks
+    callOp(c, "pointWrite", ["id":ptW.id, "level":n(16), "val":n(160)])
+    callOp(c, "pointWrite", ["id":ptW.id, "level":n(8), "val":n(80), "duration":n(1, "hr")])
 
     // write requires admin, read does not
     verifyPermissionErr { this.callOp(this.a, "pointWrite", ["id":this.ptW.id, "level":n(16), "val":n(70)]) }
-    verifyEq(((Grid)callOp(a, "pointWrite", ["id":ptW.id])).size, 17)
+    res = (Grid)callOp(a, "pointWrite", ["id":ptW.id])
+    verifyEq(res.size, 18)
+    verifyEq(res.meta["writeVal"], n(80))
+    verifyEq(res.meta["writeLevel"], n(8))
+    verifyEq(res[17]["val"], n(181))
+    verifyEq(res[17]["who"], "Haystack.pointWrite | api-masked")
   }
 
 //////////////////////////////////////////////////////////////////////////

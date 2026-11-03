@@ -128,10 +128,14 @@ column meta.
 
 # PointWrite
 
-- Read the priority array: post just the `id` → returns 17 rows
-  (level, val, who, expires)
-- Write: post `id`, `level` (1-17), `val`, optional `who`; level 8
-  supports a `duration` for timed overrides
+- Read the priority array: post just the `id` → returns 18 rows
+  (level, val, who, expires); row 18 retains the last request in memory,
+  even if masked; metadata reports the last effective output
+- Write: post `id`, `level` (1-18), `val`, optional `who`; level 8
+  supports a `duration` for timed overrides. Level 18 writes only when
+  levels 1-17 are empty, including repeated values; it is never a fallback
+  on release. Null at level 18 clears its value; level 18 is never persisted
+  or restored.
 
 # Calling Other Haystack Servers from Axon
 

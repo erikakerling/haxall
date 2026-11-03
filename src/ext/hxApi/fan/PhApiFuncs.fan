@@ -373,15 +373,17 @@ const class PhApiFuncs
   ** `level` parameter.
   **
   ** Read: pass only `id` and the response is a grid with the current
-  ** priority array state:
-  **   - `level`: number from 1 - 17 (17 is default)
+  ** priority array state and last effective `writeVal`/`writeLevel` metadata:
+  **   - `level`: number from 1 - 18 (17 is default); row 18 retains the last
+  **     request in memory, even if masked
   **   - `levelDis`: human description of the level
   **   - `val`: current value at the level or null
   **   - `who`: who last controlled the value at this level
   **
   ** Write parameters:
   **   - `id`: Ref identifier of the writable point
-  **   - `level`: Number from 1-17 for the level to write
+  **   - `level`: Number from 1-18; level 18 writes only when levels 1-17 are
+  **     empty, including repeated values. It is never a fallback on release.
   **   - `val`: value to write, or null to auto the level
   **   - `who`: optional username/application name performing the write,
   **     otherwise the authenticated user's display name is used

@@ -27,6 +27,9 @@ class WriteTest : HxTest
 
     pt := addRec(["dis":"P", "point":m, "writable":m, "kind":"Number"])
     ptId := pt.id.toCode
+    proj.sync
+    ext.writeMgr.sync
+    proj.db.sync
 
     // initial state
     verifyWrite(ext, pt, null, 17, [:])
@@ -68,9 +71,77 @@ class WriteTest : HxTest
     eval("pointSetDef($ptId, null)")
     verifyWrite(ext, pt, null, 17, [:])
 
+    // level 18 retains the last request in the array
+    2.times
+    {
+      eval("pointWrite($ptId, 180, 18, \"test-18\")")
+      g := verifyWrite(ext, pt, n(180), 18, [18:n(180)])
+      verifyEq(g.meta["writeVal"], n(180))
+      verifyEq(g.meta["writeLevel"], n(18))
+    }
+
+    // ordinary takeover and release retain level 18 for inspection without using it
+    eval("pointWrite($ptId, 50, 5, \"test-5\")")
+    verifyWrite(ext, pt, n(50), 5, [5:n(50), 18:n(180)])
+    eval("pointWrite($ptId, null, 5, \"test-5\")")
+    verifyWrite(ext, pt, null, 17, [18:n(180)])
+
+    // every ordinary level masks level 18; releasing it never falls back to 18
+    (1..17).each |level|
+    {
+      who := level == 1 || level == 8 || level == 17 ? eval("context()->username").toStr : "test-$level"
+      eval("pointWrite($ptId, 100, $level, $who.toCode)")
+      eval("pointWrite($ptId, 180, 18, \"test-18\")")
+      verifyWrite(ext, pt, n(100), level, [level:n(100), 18:n(180)])
+      eval("pointWrite($ptId, 181, 18, \"masked-18\")")
+      verifyWrite(ext, pt, n(100), level, [level:n(100), 18:n(181)], "masked-18")
+      eval("pointWrite($ptId, null, $level, $who.toCode)")
+      verifyWrite(ext, pt, null, 17, [18:n(181)], "masked-18")
+    }
+
+    // null level 18 clears the request while a higher priority remains effective
+    eval("pointWrite($ptId, 50, 5, \"test-5\")")
+    eval("pointWrite($ptId, 180, 18, \"test-18\")")
+    verifyWrite(ext, pt, n(50), 5, [5:n(50), 18:n(180)])
+    eval("pointWrite($ptId, null, 18, \"clear-18\")")
+    verifyWrite(ext, pt, n(50), 5, [5:n(50)], "clear-18")
+    eval("pointWrite($ptId, null, 5, \"test-5\")")
+    verifyWrite(ext, pt, null, 17, [:], "clear-18")
+
+    // null level 18 also clears an effective request and returns to level 17
+    eval("pointWrite($ptId, 180, 18, \"test-18\")")
+    verifyWrite(ext, pt, n(180), 18, [18:n(180)])
+    eval("pointWrite($ptId, null, 18, \"clear-18\")")
+    verifyWrite(ext, pt, null, 17, [:], "clear-18")
+
+    // Boolean and string requests retain their values too
+    ["Bool":true, "Str":"command"].each |value, kind|
+    {
+      p := addRec(["dis":kind, "point":m, "writable":m, "kind":kind])
+      proj.sync
+      2.times
+      {
+        ext.pointWrite(p, value, 18, "test-18").get
+        verifyWrite(ext, p, value, 18, [18:value])
+      }
+    }
+
+    verifyErr(Err#) { ext.pointWrite(pt, n(1), 0, "test") }
+    verifyErr(Err#) { ext.pointWrite(pt, n(1), 19, "test") }
+
+    // level 18 is kept only in memory and is not restored after restart
+    eval("pointWrite($ptId, 180, 18, \"test-18\")")
+    verifyWrite(ext, pt, n(180), 18, [18:n(180)])
+    projRestart
+    ext = proj.exts.get("hx.point")
+    ext.spi.sync
+    proj.sync
+    ext.writeMgr.sync
+    proj.db.sync
+    verifyWrite(ext, pt, null, 17, [:])
   }
 
-  Grid verifyWrite(PointExt ext, Dict pt, Obj? val, Int level, Int:Obj? levels)
+  Grid verifyWrite(PointExt ext, Dict pt, Obj? val, Int level, Int:Obj? levels, Str? who18 := null)
   {
     proj.sync
     pt = proj.readById(pt.id)
@@ -100,16 +171,21 @@ class WriteTest : HxTest
     verifyEq(pt["write1"], levels[1])
     verifyEq(pt["write8"], levels[8])
     verifyEq(pt["writeDef"], levels[17])
+    verifyEq(pt["write18"], null)
 
     // pointWriteArray
     Grid g := eval("pointWriteArray($pt.id.toCode)")
-    verifyEq(g.size, 17)
+    verifyEq(g.size, 18)
+    verifyEq(g.meta["writeVal"], val)
+    verifyEq(g.meta["writeLevel"], n(level))
     g.each |row, i|
     {
       lvl := i+1
       verifyEq(row->level, n(lvl))
       verifyEq(row["val"], levels[lvl])
-      if (row.has("val"))
+      if (lvl == 18)
+        verifyEq(row["who"], who18 ?: (row.has("val") ? "test-18" : null))
+      else if (row.has("val"))
       {
         if (lvl == 1 || lvl == 8 || lvl == 17)
           verifyEq(row["who"], eval("context()->username"))
@@ -134,16 +210,19 @@ class WriteTest : HxTest
 
     x := addRec(["dis":"X", "point":m, "writable":m, "kind":"Number"])
     y := addRec(["dis":"Y", "point":m, "writable":m, "kind":"Number"])
+    z := addRec(["dis":"Z", "point":m, "writable":m, "kind":"Number"])
 
     obsA := TestObserver()
     obsB := TestObserver()
     obsX := TestObserver()
     obsY := TestObserver()
+    obsZ := TestObserver()
 
     proj.obs.get("obsPointWrites").subscribe(obsA, Etc.makeDict([:]))
     proj.obs.get("obsPointWrites").subscribe(obsB, Etc.makeDict(["obsAllWrites":m]))
     proj.obs.get("obsPointWrites").subscribe(obsX, Etc.makeDict(["obsFilter":"dis==\"X\""]))
     proj.obs.get("obsPointWrites").subscribe(obsY, Etc.makeDict(["obsFilter":"dis==\"Y\""]))
+    proj.obs.get("obsPointWrites").subscribe(obsZ, Etc.makeDict(["obsFilter":"dis==\"Z\""]))
 
     reset := |->|
     {
@@ -152,6 +231,7 @@ class WriteTest : HxTest
       obsB.clear
       obsX.clear
       obsY.clear
+      obsZ.clear
     }
 
     // verify no events received before steady state
@@ -159,11 +239,13 @@ class WriteTest : HxTest
     {
       verifyEq(proj.isSteadyState, false)
       eval("pointWrite($x.id.toCode, 987, 16, \"test-16\")")
-
+      eval("pointWrite($z.id.toCode, 180, 18, \"test-18\")")
+      verifyWrite(ext, z, n(180), 18, [18:n(180)])
       verifyObs(obsA, x, null, -1, "")
       verifyObs(obsB, x, null, -1, "")
       verifyObs(obsX, x, null, -1, "")
       verifyObs(obsY, y, null, -1, "")
+      verifyObs(obsZ, z, null, -1, "")
     }
     catch (TestErr e)
     {
@@ -180,9 +262,10 @@ class WriteTest : HxTest
     ext.writeMgr.forceCheck
 
     // verify first event
-    // Note: its indeterminate whether obsA/obsB received x or y last
+    // Note: its indeterminate whether obsA/obsB received x, y, or z last
     verifyObs(obsX, x, n(987), 16, "first")
     verifyObs(obsY, y, null, 17, "first")
+    verifyObs(obsZ, z, n(180), 18, "first")
 
     // set level 123 @ 16
     reset()
@@ -247,10 +330,32 @@ class WriteTest : HxTest
     verifyObs(obsX, x, null, -1, "")
     verifyObs(obsY, y, null, -1, "")
 
+    // level 18 is masked too; only allWrites observes the request
+    reset()
+    eval("pointWrite($x.id.toCode, 180, 18, \"test-18\")")
+    verifyWrite(ext, x, n(789), 14, [14:n(789), 15:n(150), 16:n(123), 18:n(180)])
+    verifyObs(obsA, x, null, -1, "")
+    verifyObs(obsB, x, n(180), 18, "test-18")
+    verifyObs(obsX, x, null, -1, "")
+    verifyObs(obsY, y, null, -1, "")
+
+    // a different masked request replaces val and who, and repeats still notify allWrites
+    2.times
+    {
+      reset()
+      eval("pointWrite($x.id.toCode, 181, 18, \"masked-18\")")
+      verifyWrite(ext, x, n(789), 14, [14:n(789), 15:n(150), 16:n(123), 18:n(181)], "masked-18")
+      verifyObs(obsA, x, null, -1, "")
+      verifyObs(obsB, x, n(181), 18, "masked-18")
+      verifyObs(obsX, x, null, -1, "")
+      verifyObs(obsY, y, null, -1, "")
+      verifyEq(obsB.msgs.size, 1)
+    }
+
     // null level 15 (only allWrites obs receives event)
     reset()
     eval("pointWrite($x.id.toCode, null, 15, \"test-15\")")
-    verifyWrite(ext, x, n(789), 14, [14:n(789), 16: n(123)])
+    verifyWrite(ext, x, n(789), 14, [14:n(789), 16:n(123), 18:n(181)], "masked-18")
     verifyObs(obsA, x, null, -1, "")
     verifyObs(obsB, x, null, 15, "test-15")
     verifyObs(obsX, x, null, -1, "")
@@ -258,18 +363,40 @@ class WriteTest : HxTest
 
     // null level 16 (only allWrites obs receives event)
     eval("pointWrite($x.id.toCode, null, 16, \"test-16\")")
-    verifyWrite(ext, x, n(789), 14, [14:n(789)])
+    verifyWrite(ext, x, n(789), 14, [14:n(789), 18:n(181)], "masked-18")
     verifyObs(obsA, x, null, -1, "")
     verifyObs(obsB, x, null, 16, "test-16")
     verifyObs(obsX, x, null, -1, "")
     verifyObs(obsY, y, null, -1, "")
 
-    // null level 14 (all receive auto event)
+    // null level 14 (all receive auto event; retained level 18 is not a fallback)
     eval("pointWrite($x.id.toCode, null, 14, \"test-14\")")
-    verifyWrite(ext, x, null, 17, [:])
+    verifyWrite(ext, x, null, 17, [18:n(181)], "masked-18")
     verifyObs(obsA, x, null, 17, "test-14")
     verifyObs(obsB, x, null, 14, "test-14")
     verifyObs(obsX, x, null, 17, "test-14")
+    verifyObs(obsY, y, null, -1, "")
+
+    // repeated level 18 requests each issue an effective observation
+    2.times
+    {
+      reset()
+      eval("pointWrite($x.id.toCode, 180, 18, \"test-18\")")
+      verifyWrite(ext, x, n(180), 18, [18:n(180)])
+      verifyObs(obsA, x, n(180), 18, "test-18")
+      verifyObs(obsB, x, n(180), 18, "test-18")
+      verifyObs(obsX, x, n(180), 18, "test-18")
+      verifyEq(obsA.msgs.size, 1)
+      verifyEq(obsB.msgs.size, 1)
+    }
+
+    // null level 18 clears the request and observes the ordinary null fallback
+    reset()
+    eval("pointWrite($x.id.toCode, null, 18, \"clear-18\")")
+    verifyWrite(ext, x, null, 17, [:], "clear-18")
+    verifyObs(obsA, x, null, 17, "clear-18")
+    verifyObs(obsB, x, null, 18, "clear-18")
+    verifyObs(obsX, x, null, 17, "clear-18")
     verifyObs(obsY, y, null, -1, "")
   }
 

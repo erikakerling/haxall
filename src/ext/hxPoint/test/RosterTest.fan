@@ -144,7 +144,7 @@ class RosterTest : HxTest
     verifyEq(rec["writeVal"], val)
     verifyEq(rec["writeLevel"], n(level))
     array := writeArray(id)
-    verifyEq(array.size, 17)
+    verifyEq(array.size, 18)
     return array
   }
 

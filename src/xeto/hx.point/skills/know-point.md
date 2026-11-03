@@ -47,22 +47,30 @@ a 16-level priority array plus relinquish default:
 - Level 17 ("def"): relinquish default, used when levels 1-16 are
   all null
 
-The effective `writeVal`/`writeLevel` is the first non-null value
-scanning level 1 to 17. Writing null to a level releases it ("auto")
+For writes to levels 1-17, the effective `writeVal`/`writeLevel` is the first
+non-null value scanning level 1 to 17. Writing null releases a level ("auto")
 so the next level wins. Only levels 1, 8 (untimed), and def persist
-across restart; all other levels must be rewritten by their
+across restart; other levels from 1-17 must be rewritten by their
 application on startup.
+
+Level 18 requests a write, including repeated values, when levels 1-17 are
+empty. Row 18 retains its value and who in memory, even if masked; masked
+requests do not change the effective output. Null clears its value. Writes
+to levels 1-17 do not clear row 18 or select it as a fallback on release.
+Level 18 is never persisted or restored. `writeVal`/`writeLevel` and array
+metadata report the last effective output.
 
 ```axon
 pointWrite(pt, 72°F, 16, "myApp")    // write level 16 with who
 pointWrite(pt, null, 16, "myApp")    // release level 16
+pointWrite(pt, 72°F, 18, "myApp")    // request when levels 1-17 are empty
 pointOverride(pt, 75°F)              // level 8 manual override
 pointOverride(pt, 75°F, 30min)       // timed: auto-releases after 30min
 pointAuto(pt)                        // release level 8
 pointEmergencyOverride(pt, 60°F)     // level 1
 pointEmergencyAuto(pt)               // release level 1
 pointSetDef(pt, 70°F)                // level 17 relinquish default
-pointWriteArray(pt)                  // grid of all 17 levels
+pointWriteArray(pt)                  // grid of all 18 levels
 ```
 
 Write rules:
@@ -72,12 +80,11 @@ Write rules:
 - The `who` argument is stored per level for auditing (defaults to
   the current user)
 - Start any "why is this point commanded to this value"
-  investigation with `pointWriteArray(pt)` - it shows every level,
+  investigation with `pointWriteArray(pt)` - it shows retained levels,
   who set it, and timed override expiration
 
-The `obsPointWrites` observable fires when the effective value
-changes (not on every level write), so tasks can react to command
-changes.
+The `obsPointWrites` observable fires when the effective value or level
+changes, or when level 18 is selected, so tasks can react to command changes.
 
 # History Collection
 

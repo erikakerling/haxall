@@ -27,7 +27,7 @@ internal class WriteRec
   {
     this.id = id
     this.rec = rec
-    this.levels = WriteLevel?[,] { size = 17 }
+    this.levels = WriteLevel?[,] { size = 18 }
 
     // restore 1, 8, and def from persisted tags
     init(1, "write1")
@@ -95,8 +95,9 @@ internal class WriteRec
 
     // short circuit rest of logic if there is no change because
     // its very common for control applications to rewrite
-    // the same value+level at a high frequency in control loops
-    if (lvl.val == val && whoIsEqual(lvl.who, who)) return val
+    // the same value+level at a high frequency in control loops,
+    // except for explicit level 18 requests
+    if (level != 18 && lvl.val == val && whoIsEqual(lvl.who, who)) return val
 
     // update level val and who
     lvl.val = val
@@ -114,7 +115,7 @@ internal class WriteRec
     }
 
     // update output
-    effectiveChange := update(mgr)
+    effectiveChange := update(mgr, level == 18)
 
     // fire observations only after steady state is reached;
     // steady state is when we uniformly fire off all initial writes
@@ -148,15 +149,15 @@ internal class WriteRec
     rec = mgr.proj.db.commit(Diff(rec, Etc.dict1(tag, val ?: None.val), Diff.force)).newRec
   }
 
-  ** Update effective value and level.  Return true if there is an effective
-  ** change and sink it to Folio as a transient commit via WriteMgr.sink
-  private Bool update(WriteMgr mgr)
+  ** Update effective value and level, including level 18 only on request.
+  ** Sink the output to Folio and return true when it should be issued.
+  private Bool update(WriteMgr mgr, Bool level18 := false)
   {
     // compute new write val/level
-    level := levelNums.last
+    level := levelNums[16]
     val := null
     who := null
-    for (i:=0; i<17; ++i)
+    for (i:=0; i<(level18 ? 18 : 17); ++i)
     {
       lvl := levels[i]
       if (lvl == null || lvl.val == null) continue
@@ -166,8 +167,8 @@ internal class WriteRec
       break
     }
 
-    // if not an effective change, then short circuit and return false
-    if (val == lastVal && level == lastLevel) return false
+    // short circuit if not an effective change, except for level 18 requests
+    if (level.toInt != 18 && val == lastVal && level == lastLevel) return false
 
     // sink effective change to folio and return true
     lastVal = val
@@ -228,11 +229,11 @@ internal class WriteRec
 
     // build grid
     gb := GridBuilder()
-    gb.capacity = 17
+    gb.capacity = 18
     gb.setMeta(meta)
       .addCol("level").addCol("levelDis").addCol("val")
       .addCol("valDis").addCol("who").addCol("expires")
-    for (i:=0; i<17; ++i)
+    for (i:=0; i<18; ++i)
     {
       lvl := levels[i]
       val := null
@@ -271,7 +272,7 @@ internal class WriteRec
   static const Str[] levelDis :=
   [
     "1 (emergency)", "2", "3", "4", "5", "6", "7", "8 (manual)",
-    "9", "10", "11", "12", "13", "14", "15", "16", "def"
+    "9", "10", "11", "12", "13", "14", "15", "16", "def", "18 (request)"
   ]
 
   ** Levels as Number (zero based)s
@@ -279,7 +280,7 @@ internal class WriteRec
   static
   {
     list := Number[,]
-    for (i:=0; i<17; ++i) list.add(Number.makeInt(i+1))
+    for (i:=0; i<18; ++i) list.add(Number.makeInt(i+1))
     levelNums = list
   }
 
@@ -287,7 +288,7 @@ internal class WriteRec
   Dict rec { private set }          // current state of record
   Obj? lastVal { private set }      // last value written
   Number? lastLevel { private set } // last level written
-  private WriteLevel?[] levels      // index 0 => level 1, index 17 -> def
+  private WriteLevel?[] levels      // index 0 => level 1, 16 => def, 17 => last request
   private Int overrideExpire        // Duration ticks to send 8 back to auto or zero
 }
 

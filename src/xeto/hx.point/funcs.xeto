@@ -127,8 +127,10 @@
 
   // Set a writable point's priority array value at the given level.
   // The point may be any value accepted by [toRec()].  Level must
-  // be 1 to 17 (where 17 represents def value).  The who parameter
-  // is a string which represent debugging information about which
+  // be 1 to 18 (where 17 represents def value). Level 18 retains the last
+  // request in memory and writes only when levels 1-17 are empty, including
+  // repeated values. It is never selected as a fallback on release. The who
+  // parameter is a string which represent debugging information about which
   // user or application is writing to this priorirty array level.
   // If who is omitted, then the current user's display string is used
   pointWrite: Func <admin, sideEffects> { point: Obj, val: Obj?, level: Number?, who: Obj?, opts: Dict?, returns: Obj? }
@@ -138,9 +140,10 @@
   pointOverrideCommand: Func <sideEffects> { point: Obj, val: Obj?, level: Number, duration: Number?, returns: Obj? }
 
   // Return the current priority array state of a writable point.
-  // The point may be any value accepted by [toRec()].  The result is
-  // returned grid with following columns:
-  //   - level: number from 1 - 17 (17 is default)
+  // The point may be any value accepted by [toRec()]. Grid metadata
+  // 'writeVal' and 'writeLevel' report the last effective output. Columns:
+  //   - level: number from 1 - 18 (17 is default); row 18 retains the last
+  //     request in memory, even if masked. It is not a fallback value.
   //   - levelDis: human description of level
   //   - val: current value at level or null
   //   - who: who last controlled the value at this level
